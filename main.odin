@@ -17,14 +17,8 @@ main :: proc() {
         return
     }
 
-    tokens, tokenizer_ok := get_tokens_list(string(src))
-    if !tokenizer_ok do return
-    sexprs, parse_ok := parse(tokens)
-    if !parse_ok {
-        fmt.println("parse fail")
-        return
-    }
-    js_code := render_js_code(sexprs)
+    js_code, compile_ok := compile_to_js(string(src))
+    if !compile_ok do return
 
     out_path: string
     if len(args) == 2 {
