@@ -16,30 +16,33 @@ pop_byte :: proc(r: ^Render, cnt := 1) {
     for _ in 0 ..< cnt do strings.pop_byte(&r.buff)
 }
 
-render_js_code :: proc(sexprs: []SExpr) -> string {
+render_js_code :: proc(
+    sexprs: []SExpr,
+    need_prelude: bool,
+) -> (
+    result: string,
+    ok: bool,
+) {
     r := Render{}
     strings.builder_init(&r.buff)
 
-    push_str(&r, string(#load("./prelude.js")))
+    if need_prelude {
+        push_str(&r, string(#load("./prelude.js")))
+    }
 
     for &sexpr in sexprs {
         is_printable := is_printable_sexpr(&r, sexpr)
-        if is_printable {
-            push_str(&r, "console.log(")
-        }
-        render_sexpr(&r, &sexpr)
-        if is_printable {
-            push_str(&r, ")")
-        }
+        render_sexpr(&r, &sexpr) or_return
         push_str(&r, ";\n")
     }
 
-    return strings.to_string(r.buff)
+    return strings.to_string(r.buff), true
 }
 
 is_printable_sexpr :: proc(r: ^Render, sexpr: SExpr) -> bool {
     return(
         sexpr.special_form_kind != .Def &&
+        sexpr.special_form_kind != .Import &&
         len(sexpr.items) != 0 &&
         !(sexpr.items[0].tag == .Ident &&
                 sexpr.items[0].value.(string) == "print") \
@@ -88,13 +91,25 @@ render_equality_or_comparison :: proc(
     return op_len
 }
 
-
-render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) {
+@(require_results)
+render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) -> bool {
     if len(sexpr.items) == 0 {
         push_str(r, "undefined")
-        return
+        return false
     }
     switch sexpr.special_form_kind {
+    case .Import:
+        module_name := sexpr.items[1].value.(string)
+        module_path := sexpr.items[2].value.(string)
+        push_str(r, "const ")
+        render_sexpr_item(r, &sexpr.items[1])
+        push_str(r, " = (function () {\n")
+        module_code := compile_file_to_js(module_path, false) or_return
+        push_str(r, module_code)
+        push_str(r, "\n")
+        push_str(r, "})()")
+
+
     case .Lambda:
         params := sexpr.items[1].value.(SExpr).items
         lambda_body := sexpr.items[2]
@@ -126,23 +141,8 @@ render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) {
         for &item, i in sexpr.items[1:] {
             is_printable := is_printable_sexpr_item(r, item)
             is_last := len(sexpr.items) - 2 <= i
-            if is_printable {
-                if is_last {
-                    push_str(r, "const ___tmp = ")
-                    render_sexpr_item(r, &item)
-                    push_str(r, ";\n")
-                    push_str(r, "console.log(___tmp);\n")
-                    push_str(r, "return ___tmp;")
-                } else {
-                    push_str(r, "console.log(")
-                    render_sexpr_item(r, &item)
-                    push_str(r, ")")
-                    push_str(r, ";\n")
-                }
-            } else {
-                render_sexpr_item(r, &item)
-                push_str(r, ";\n")
-            }
+            render_sexpr_item(r, &item)
+            push_str(r, ";\n")
         }
         push_str(r, "}")
     case .Def:
@@ -223,7 +223,7 @@ render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) {
             case:
                 panic("unreachable")
             }
-            return
+            return false
         }
         push_str(r, "(")
         for &item in sexpr.items[1:] {
@@ -268,12 +268,13 @@ render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) {
         push_str(r, ")")
     }
 
+    return true
 }
 
-render_sexpr_item :: proc(r: ^Render, item: ^SExpr_Item) {
+render_sexpr_item :: proc(r: ^Render, item: ^SExpr_Item) -> bool {
     switch item.tag {
     case .SExpr:
-        render_sexpr(r, &item.value.(SExpr))
+        return render_sexpr(r, &item.value.(SExpr))
     case .Ident:
         push_str(r, replace_problematic_idents(item.value.(string)))
     case .Number:
@@ -283,6 +284,8 @@ render_sexpr_item :: proc(r: ^Render, item: ^SExpr_Item) {
         push_str(r, item.value.(string))
         push_str(r, "\"")
     }
+
+    return true
 }
 
 replace_problematic_idents :: proc(lexeme: string) -> string {

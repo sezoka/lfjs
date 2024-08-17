@@ -11,14 +11,9 @@ main :: proc() {
         return
     }
 
-    src, read_err := os.read_entire_file_from_path(args[1], context.allocator)
-    if read_err != nil {
-        fmt.eprintln("failed reading file", args[1])
-        return
-    }
-
-    js_code, compile_ok := compile_to_js(string(src))
+    js_code, compile_ok := compile_file_to_js(args[1])
     if !compile_ok do return
+
 
     out_path: string
     if len(args) == 2 {
@@ -27,7 +22,7 @@ main :: proc() {
         out_path = args[2]
     }
 
-    write_err := os.write_entire_file(out_path, transmute([]u8)js_code, 0x555)
+    write_err := os.write_entire_file(out_path, transmute([]u8)js_code, 0x700)
 
     if len(args) == 2 {
         process, process_err := os.process_start(

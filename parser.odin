@@ -20,6 +20,7 @@ Special_Form_Kind :: enum {
     Do,
     Cond,
     Lambda,
+    Import,
 }
 
 SExpr :: struct {
@@ -123,6 +124,23 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
         ident := sexpr_items[0].value.(string)
 
         switch ident {
+        case "import":
+            special_form_kind = .Import
+            if len(sexpr_items) != 3 {
+                return parse_error(
+                    "error: special form 'import' should take 2 arguments (import <module_name> \"path_to_modile.lfjs\">)",
+                )
+            }
+            if sexpr_items[1].tag != .Ident {
+                return parse_error(
+                    "error: special form 'import' expects module name as first argument (import <module_name> \"path_to_modile.lfjs\">)",
+                )
+            }
+            if sexpr_items[2].tag != .String {
+                return parse_error(
+                    "error: special form 'import' expects module path as second argument (import <module_name> \"path_to_modile.lfjs\">)",
+                )
+            }
         case "lambda":
             special_form_kind = .Lambda
             if len(sexpr_items) != 3 {
@@ -140,7 +158,7 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
             for param in params_list {
                 if param.tag != .Ident {
                     return parse_error(
-                    "error: special form 'lambda' expect parameter name list as first argument, for example (lambda (x y z) (+ x y z))",
+                        "error: special form 'lambda' expect parameter name list as first argument, for example (lambda (x y z) (+ x y z))",
                     )
                 }
             }
