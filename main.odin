@@ -12,9 +12,8 @@ main :: proc() {
         return
     }
 
-    js_code, compile_ok := compile_file_to_js(args[1], true, "./")
+    js_code, compile_ok := compile_file_to_js(args[1], true, true, ".")
     if !compile_ok do return
-
 
     out_path: string
     if len(args) == 2 {

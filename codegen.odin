@@ -20,6 +20,7 @@ pop_byte :: proc(r: ^Renderer, cnt := 1) {
 render_js_code :: proc(
     sexprs: []SExpr,
     need_prelude: bool,
+    need_export: bool,
     dir_path: string,
 ) -> (
     result: string,
@@ -30,15 +31,19 @@ render_js_code :: proc(
     strings.builder_init(&r.buff)
 
     if need_prelude {
-        push_str(&r, string(#load("./prelude.js")))
-        push_str(&r, "const std = (function() {\n")
         push_str(
             &r,
-            compile_file_to_js("./std/std.lfjs", false, "./") or_return,
+            compile_file_to_js(
+                "./prelude/prelude.lfjs",
+                false,
+                false,
+                ".",
+            ) or_return,
         )
-        push_str(&r, "return ___module_export;\n})()\n")
     }
-    push_str(&r, "const ___module_export = {};\n")
+    if need_export {
+        push_str(&r, "const ___module_export = {};\n")
+    }
 
 
     for &sexpr in sexprs {
@@ -118,8 +123,9 @@ render_sexpr :: proc(r: ^Renderer, sexpr: ^SExpr) -> bool {
     case .Embed_Code:
         code := sexpr.items[1].value.(string)
         push_str(r, code)
-    case .Import:
-        module_name := sexpr.items[1].value.(string)
+    case .Import, .Pub_Import:
+        is_pub_import := sexpr.special_form_kind == .Pub_Import
+
         module_path := sexpr.items[2].value.(string)
         push_str(r, "const ")
         render_sexpr_item(r, &sexpr.items[1])
@@ -127,10 +133,18 @@ render_sexpr :: proc(r: ^Renderer, sexpr: ^SExpr) -> bool {
         module_code := compile_file_to_js(
             module_path,
             false,
+            true,
             r.dir_path,
         ) or_return
         push_str(r, module_code)
-        push_str(r, "return ___module_export;\n})()")
+        push_str(r, "return ___module_export;\n})();\n")
+        if is_pub_import {
+            push_str(r, "___module_export[\"")
+            render_sexpr_item(r, &sexpr.items[1])
+            push_str(r, "\"] = ")
+            render_sexpr_item(r, &sexpr.items[1])
+            push_str(r, ";\n")
+        }
     case .Lambda:
         params := sexpr.items[1].value.(SExpr).items
         lambda_body := sexpr.items[2]

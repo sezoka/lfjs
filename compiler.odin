@@ -8,6 +8,7 @@ import "core:strings"
 compile_to_js :: proc(
     src: string,
     need_prelude: bool,
+    need_export: bool,
     dir_path: string,
 ) -> (
     result: string,
@@ -20,12 +21,13 @@ compile_to_js :: proc(
         return {}, false
     }
 
-    return render_js_code(sexprs, need_prelude, dir_path)
+    return render_js_code(sexprs, need_prelude, need_export, dir_path)
 }
 
 compile_file_to_js :: proc(
     path_to_file: string,
     need_prelude: bool,
+    need_export: bool,
     base_path: string,
 ) -> (
     result: string,
@@ -43,5 +45,5 @@ compile_file_to_js :: proc(
         return
     }
 
-    return compile_to_js(string(src), need_prelude, compiled_file_dir_path)
+    return compile_to_js(string(src), need_prelude, need_export, compiled_file_dir_path)
 }

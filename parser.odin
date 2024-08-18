@@ -21,6 +21,7 @@ Special_Form_Kind :: enum {
     Cond,
     Lambda,
     Import,
+    Pub_Import,
     Embed_Code,
 }
 
@@ -119,7 +120,9 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
             true
     }
 
-    if sexpr_items[0].tag != .Ident  && sexpr_items[0].tag != .SExpr && sexpr_items[0].tag != .Field_Access {
+    if sexpr_items[0].tag != .Ident &&
+       sexpr_items[0].tag != .SExpr &&
+       sexpr_items[0].tag != .Field_Access {
         fmt.eprintln(
             "error: first item in s-expression should be identifier or s-expression",
         )
@@ -132,16 +135,31 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
         ident := sexpr_items[0].value.(string)
 
         switch ident {
-        case "embed-code!":
+        case "@pub-import":
+            special_form_kind = .Pub_Import
+            if len(sexpr_items) != 3 {
+                return parse_error(
+                    "error: special form '@pub-import' should take 2 arguments (@pub-import <module_name> \"path_to_modile.lfjs\">)",
+                )
+            }
+            if sexpr_items[1].tag != .Ident {
+                return parse_error(
+                    "error: special form '@pub-import' expects module name as first argument (@pub-import <module_name> \"path_to_modile.lfjs\">)",
+                )
+            }
+            if sexpr_items[2].tag != .String {
+                return parse_error(
+                    "error: special form '@pub-import' expects module path as second argument (@pub-import <module_name> \"path_to_modile.lfjs\">)",
+                )
+            }
+        case "@embed-code":
             special_form_kind = .Embed_Code
             if len(sexpr_items) != 2 {
                 return parse_error(
-                    "error: special form 'embed_code!' should take 2 arguments (embed-code! \"console.log('hello world')\")",
+                    "error: special form '@embed_code' should take 2 arguments (@embed-code \"console.log('hello world')\")",
                 )
             }
-
-
-        case "import":
+        case "@import":
             special_form_kind = .Import
             if len(sexpr_items) != 3 {
                 return parse_error(

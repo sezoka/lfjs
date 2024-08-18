@@ -83,7 +83,9 @@ scan_next_token :: proc(t: ^Tokenizer) -> (Token, bool) {
     case '\'':
         return make_token(t, .Quote), true
     case '"':
-        return read_string(t)
+        return read_string(t, '"')
+    case '`':
+        return read_string(t, '`')
     case:
         if unicode.is_digit(r) ||
            (unicode.is_digit(peek_rune(t)) && r == '-') {
@@ -96,9 +98,12 @@ scan_next_token :: proc(t: ^Tokenizer) -> (Token, bool) {
     return {}, false
 }
 
-read_string :: proc(t: ^Tokenizer) -> (Token, bool) {
-    for !is_tokenizer_at_end(t) && peek_rune(t) != '"' {
-        next_rune(t)
+read_string :: proc(t: ^Tokenizer, sym: rune) -> (Token, bool) {
+    for !is_tokenizer_at_end(t) && peek_rune(t) != sym {
+        prev := next_rune(t)
+        if prev == '\\' && peek_rune(t) == sym {
+            next_rune(t)
+        }
     }
     if is_tokenizer_at_end(t) {
         fmt.eprintln("error: unenclosed string")

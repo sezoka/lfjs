@@ -1,3 +1,6 @@
 
 
-(def print-something () (embed-code! "console.log('poshel nahuy')"))
+(def print-something () (print "something"))
+
+(@pub-import math "./math.lfjs")
+
