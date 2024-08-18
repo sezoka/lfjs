@@ -2,6 +2,7 @@ package lfjs
 
 import "core:fmt"
 import os "core:os/os2"
+import "core:strings"
 
 
 main :: proc() {
@@ -11,7 +12,7 @@ main :: proc() {
         return
     }
 
-    js_code, compile_ok := compile_file_to_js(args[1])
+    js_code, compile_ok := compile_file_to_js(args[1], true, "./")
     if !compile_ok do return
 
 

@@ -1,0 +1,3 @@
+
+
+(def print-something () (embed-code! "console.log('poshel nahuy')"))

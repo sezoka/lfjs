@@ -17,6 +17,7 @@ Token_Tag :: enum {
     Left_Paren,
     Right_Paren,
     Ident,
+    Field_Access,
     Number,
     Quote,
     String,
@@ -130,11 +131,15 @@ get_curr_token_lexeme :: proc(t: ^Tokenizer) -> string {
 }
 
 read_symbol :: proc(t: ^Tokenizer) -> Token {
+    is_field_access := false
     for !is_tokenizer_at_end(t) && is_ident_rune(peek_rune(t)) {
-        next_rune(t)
+        rune := next_rune(t)
+        if rune == '.' {
+            is_field_access = true
+        }
     }
 
-    return make_token(t, .Ident)
+    return make_token(t, is_field_access ? .Field_Access : .Ident)
 }
 
 is_ident_rune :: proc(r: rune) -> bool {
@@ -166,7 +171,7 @@ skip_whitespaces :: proc(t: ^Tokenizer) {
         case '\n':
             next_rune(t)
             t.line += 1
-        case '#':
+        case ';':
             for !is_tokenizer_at_end(t) && peek_rune(t) != '\n' {
                 next_rune(t)
             }

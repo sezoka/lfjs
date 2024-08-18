@@ -1,34 +1,45 @@
 package lfjs
 import "core:fmt"
-// import "core:os/os2"
 import "core:strings"
 
-Render :: struct {
+Renderer :: struct {
     buff:                   strings.Builder,
     last_expr_is_printable: bool,
+    scope_depth:            i32,
+    dir_path:               string,
 }
 
-push_str :: proc(r: ^Render, str: string) {
+push_str :: proc(r: ^Renderer, str: string) {
     strings.write_string(&r.buff, str)
 }
 
-pop_byte :: proc(r: ^Render, cnt := 1) {
+pop_byte :: proc(r: ^Renderer, cnt := 1) {
     for _ in 0 ..< cnt do strings.pop_byte(&r.buff)
 }
 
 render_js_code :: proc(
     sexprs: []SExpr,
     need_prelude: bool,
+    dir_path: string,
 ) -> (
     result: string,
     ok: bool,
 ) {
-    r := Render{}
+    r: Renderer
+    r.dir_path = dir_path
     strings.builder_init(&r.buff)
 
     if need_prelude {
         push_str(&r, string(#load("./prelude.js")))
+        push_str(&r, "const std = (function() {\n")
+        push_str(
+            &r,
+            compile_file_to_js("./std/std.lfjs", false, "./") or_return,
+        )
+        push_str(&r, "return ___module_export;\n})()\n")
     }
+    push_str(&r, "const ___module_export = {};\n")
+
 
     for &sexpr in sexprs {
         is_printable := is_printable_sexpr(&r, sexpr)
@@ -39,7 +50,7 @@ render_js_code :: proc(
     return strings.to_string(r.buff), true
 }
 
-is_printable_sexpr :: proc(r: ^Render, sexpr: SExpr) -> bool {
+is_printable_sexpr :: proc(r: ^Renderer, sexpr: SExpr) -> bool {
     return(
         sexpr.special_form_kind != .Def &&
         sexpr.special_form_kind != .Import &&
@@ -49,7 +60,7 @@ is_printable_sexpr :: proc(r: ^Render, sexpr: SExpr) -> bool {
     )
 }
 
-is_printable_sexpr_item :: proc(r: ^Render, item: SExpr_Item) -> bool {
+is_printable_sexpr_item :: proc(r: ^Renderer, item: SExpr_Item) -> bool {
     switch item.tag {
     case .SExpr:
         return is_printable_sexpr(r, item.value.(SExpr))
@@ -59,12 +70,14 @@ is_printable_sexpr_item :: proc(r: ^Render, item: SExpr_Item) -> bool {
         return true
     case .String:
         return true
+    case .Field_Access:
+        return true
     }
     return true
 }
 
 render_equality_or_comparison :: proc(
-    r: ^Render,
+    r: ^Renderer,
     sfk: Special_Form_Kind,
 ) -> int {
     op_len := 1
@@ -92,24 +105,32 @@ render_equality_or_comparison :: proc(
 }
 
 @(require_results)
-render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) -> bool {
+render_sexpr :: proc(r: ^Renderer, sexpr: ^SExpr) -> bool {
     if len(sexpr.items) == 0 {
         push_str(r, "undefined")
         return false
     }
+
+    r.scope_depth += 1
+    defer r.scope_depth -= 1
+
     switch sexpr.special_form_kind {
+    case .Embed_Code:
+        code := sexpr.items[1].value.(string)
+        push_str(r, code)
     case .Import:
         module_name := sexpr.items[1].value.(string)
         module_path := sexpr.items[2].value.(string)
         push_str(r, "const ")
         render_sexpr_item(r, &sexpr.items[1])
         push_str(r, " = (function () {\n")
-        module_code := compile_file_to_js(module_path, false) or_return
+        module_code := compile_file_to_js(
+            module_path,
+            false,
+            r.dir_path,
+        ) or_return
         push_str(r, module_code)
-        push_str(r, "\n")
-        push_str(r, "})()")
-
-
+        push_str(r, "return ___module_export;\n})()")
     case .Lambda:
         params := sexpr.items[1].value.(SExpr).items
         lambda_body := sexpr.items[2]
@@ -124,7 +145,6 @@ render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) -> bool {
         push_str(r, ") => ")
         render_sexpr_item(r, &lambda_body)
         push_str(r, ")")
-
     case .Cond:
         for i := 1; i < len(sexpr.items); i += 2 {
             render_sexpr_item(r, &sexpr.items[i])
@@ -146,15 +166,14 @@ render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) -> bool {
         }
         push_str(r, "}")
     case .Def:
+        def_name := replace_problematic_idents(sexpr.items[1].value.(string))
         if len(sexpr.items) == 4 {
-            def_name := replace_problematic_idents(
-                sexpr.items[1].value.(string),
-            )
             params := sexpr.items[2].value.(SExpr).items
             lambda_body := sexpr.items[3]
             push_str(r, "const ")
             push_str(r, def_name)
             push_str(r, " = (")
+
             for param in params {
                 push_str(r, replace_problematic_idents(param.value.(string)))
                 push_str(r, ", ")
@@ -173,6 +192,12 @@ render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) -> bool {
             push_str(r, def_name)
             push_str(r, " = ")
             render_sexpr_item(r, &def_value)
+        }
+        if r.scope_depth <= 1 {
+            push_str(r, ";\n___module_export[\"")
+            push_str(r, def_name)
+            push_str(r, "\"] = ")
+            push_str(r, def_name)
         }
     case .Let:
         push_str(r, "(((")
@@ -271,7 +296,7 @@ render_sexpr :: proc(r: ^Render, sexpr: ^SExpr) -> bool {
     return true
 }
 
-render_sexpr_item :: proc(r: ^Render, item: ^SExpr_Item) -> bool {
+render_sexpr_item :: proc(r: ^Renderer, item: ^SExpr_Item) -> bool {
     switch item.tag {
     case .SExpr:
         return render_sexpr(r, &item.value.(SExpr))
@@ -283,12 +308,17 @@ render_sexpr_item :: proc(r: ^Render, item: ^SExpr_Item) -> bool {
         push_str(r, "\"")
         push_str(r, item.value.(string))
         push_str(r, "\"")
+    case .Field_Access:
+        push_str(r, replace_problematic_idents(item.value.(string), true))
     }
 
     return true
 }
 
-replace_problematic_idents :: proc(lexeme: string) -> string {
+replace_problematic_idents :: proc(
+    lexeme: string,
+    skip_dots: bool = false,
+) -> string {
     filtered_lexeme: strings.Builder
     strings.builder_init(&filtered_lexeme)
 
@@ -305,7 +335,9 @@ replace_problematic_idents :: proc(lexeme: string) -> string {
     for r in lexeme {
         if '0' <= r && r <= '9' ||
            'a' <= r && r <= 'z' ||
-           'A' <= r && r <= 'Z' {
+           'A' <= r && r <= 'Z' ||
+           (skip_dots && r == '.') ||
+           r == '_' {
             strings.write_rune(&filtered_lexeme, r)
         } else {
             fmt.sbprint(&filtered_lexeme, u32(r))
@@ -323,5 +355,5 @@ is_reserved_keyword :: proc(lexeme: string) -> bool {
 }
 
 check_is_allowed_as_first_character_of_name :: proc(r: rune) -> bool {
-    return r == '_' || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z'
+    return r == '_' || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || r == '_'
 }

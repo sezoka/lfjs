@@ -21,6 +21,7 @@ Special_Form_Kind :: enum {
     Cond,
     Lambda,
     Import,
+    Embed_Code,
 }
 
 SExpr :: struct {
@@ -34,6 +35,7 @@ SExpr_Item_Tag :: enum {
     Number,
     Ident,
     String,
+    Field_Access,
 }
 
 SExpr_Item_Value :: union {
@@ -75,6 +77,12 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
     for (peek_token(p) or_return).tag != .Right_Paren {
         tok := peek_token(p) or_return
         #partial switch tok.tag {
+        case .Field_Access:
+            next_token(p) or_return
+            append(
+                &sexpr_items,
+                make_sexpr_item(.Field_Access, tok.lexeme, tok.line),
+            )
         case .Left_Paren:
             sexpr_item_value := parse_sexpr(p) or_return
             append(
@@ -111,7 +119,7 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
             true
     }
 
-    if sexpr_items[0].tag != .Ident && sexpr_items[0].tag != .SExpr {
+    if sexpr_items[0].tag != .Ident  && sexpr_items[0].tag != .SExpr && sexpr_items[0].tag != .Field_Access {
         fmt.eprintln(
             "error: first item in s-expression should be identifier or s-expression",
         )
@@ -124,6 +132,15 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
         ident := sexpr_items[0].value.(string)
 
         switch ident {
+        case "embed-code!":
+            special_form_kind = .Embed_Code
+            if len(sexpr_items) != 2 {
+                return parse_error(
+                    "error: special form 'embed_code!' should take 2 arguments (embed-code! \"console.log('hello world')\")",
+                )
+            }
+
+
         case "import":
             special_form_kind = .Import
             if len(sexpr_items) != 3 {

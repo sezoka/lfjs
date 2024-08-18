@@ -2,10 +2,13 @@ package lfjs
 
 import "core:fmt"
 import os "core:os/os2"
+import "core:path/filepath"
+import "core:strings"
 
 compile_to_js :: proc(
     src: string,
     need_prelude: bool,
+    dir_path: string,
 ) -> (
     result: string,
     ok: bool,
@@ -17,24 +20,28 @@ compile_to_js :: proc(
         return {}, false
     }
 
-    return render_js_code(sexprs, need_prelude)
+    return render_js_code(sexprs, need_prelude, dir_path)
 }
 
 compile_file_to_js :: proc(
     path_to_file: string,
-    need_prelude := true,
+    need_prelude: bool,
+    base_path: string,
 ) -> (
     result: string,
     ok: bool,
 ) {
+    full_path_to_file := strings.concatenate({base_path, "/", path_to_file})
+    compiled_file_dir_path := filepath.dir(full_path_to_file)
+
     src, read_err := os.read_entire_file_from_path(
-        path_to_file,
+        full_path_to_file,
         context.allocator,
     )
     if read_err != nil {
-        fmt.eprintln("failed reading file", path_to_file)
+        fmt.eprintln("failed reading file", full_path_to_file)
         return
     }
 
-    return compile_to_js(string(src), need_prelude)
+    return compile_to_js(string(src), need_prelude, compiled_file_dir_path)
 }
