@@ -15,13 +15,13 @@ compile_to_js :: proc(
     ok: bool,
 ) {
     tokens := get_tokens_list(src) or_return
-    sexprs, parse_ok := parse(tokens)
+    sexpr_items, parse_ok := parse(tokens)
     if !parse_ok {
         fmt.println("parse fail")
         return {}, false
     }
 
-    return render_js_code(sexprs, need_prelude, need_export, dir_path)
+    return render_js_code(sexpr_items, need_prelude, need_export, dir_path)
 }
 
 compile_file_to_js :: proc(
@@ -45,5 +45,10 @@ compile_file_to_js :: proc(
         return
     }
 
-    return compile_to_js(string(src), need_prelude, need_export, compiled_file_dir_path)
+    return compile_to_js(
+        string(src),
+        need_prelude,
+        need_export,
+        compiled_file_dir_path,
+    )
 }

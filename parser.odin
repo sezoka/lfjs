@@ -5,16 +5,6 @@ import "core:fmt"
 Special_Form_Kind :: enum {
     None,
     If,
-    Plus,
-    Minus,
-    Mult,
-    Div,
-    Less,
-    Greater,
-    Less_Equal,
-    Greater_Equal,
-    Equal,
-    Not_Equal,
     Let,
     Def,
     Do,
@@ -26,29 +16,30 @@ Special_Form_Kind :: enum {
 }
 
 SExpr :: struct {
-    items:             []SExpr_Item,
-    is_quoted:         bool,
-    special_form_kind: Special_Form_Kind,
+    tag:   SExpr_Tag,
+    value: SExpr_Value,
+    row:   u16,
+    col:   u16,
 }
 
-SExpr_Item_Tag :: enum {
-    SExpr,
+SExpr_Tag :: enum {
     Number,
     Ident,
     String,
+    List,
     Field_Access,
 }
 
-SExpr_Item_Value :: union {
-    SExpr,
-    f64,
+SExpr_Value :: union {
     string,
+    f64,
+    SExpr_List,
 }
 
-SExpr_Item :: struct {
-    tag:   SExpr_Item_Tag,
-    value: SExpr_Item_Value,
-    line:  u16,
+SExpr_List :: struct {
+    items:             []SExpr,
+    is_quoted:         bool,
+    special_form_kind: Special_Form_Kind,
 }
 
 Parser :: struct {
@@ -61,58 +52,57 @@ parse :: proc(tokens: []Token) -> (result: []SExpr, ok: bool) {
         tokens = tokens,
     }
 
-    sexprs: [dynamic]SExpr
+    sexpr_items: [dynamic]SExpr
 
     for !is_parser_at_end(&parser) {
-        append(&sexprs, parse_sexpr(&parser) or_return)
+        append(&sexpr_items, parse_sexpr(&parser) or_return)
     }
 
-    return sexprs[:], true
+    return sexpr_items[:], true
 }
 
-parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
+parse_sexpr :: proc(p: ^Parser) -> (item: SExpr, ok: bool) {
+    tok := peek_token(p) or_return
+    #partial switch tok.tag {
+    case .Field_Access:
+        next_token(p) or_return
+        return make_sexpr(.Field_Access, tok.lexeme, tok.row, tok.col), true
+    case .Left_Paren:
+        sexpr_list := parse_sexpr_list(p) or_return
+        return make_sexpr(.List, sexpr_list, tok.row, tok.col), true
+    case .Number:
+        next_token(p) or_return
+        return make_sexpr(.Number, tok.value.(f64), tok.row, tok.col), true
+    case .Ident:
+        next_token(p) or_return
+        return make_sexpr(.Ident, tok.lexeme, tok.row, tok.col), true
+    case .String:
+        next_token(p) or_return
+        return make_sexpr(.String, tok.value.(string), tok.row, tok.col), true
+    case:
+        fmt.eprintln(
+            "error[",
+            tok.row,
+            "]: unexpected token '",
+            tok.lexeme,
+            "'",
+            sep = "",
+        )
+    }
+    return {}, false
+}
+
+parse_sexpr_list :: proc(p: ^Parser) -> (expr: SExpr_List, ok: bool) {
     _ = expect(p, .Left_Paren, "expect '('") or_return
 
-    sexpr_items: [dynamic]SExpr_Item
-
+    sexpr_items: [dynamic]SExpr
     for (peek_token(p) or_return).tag != .Right_Paren {
-        tok := peek_token(p) or_return
-        #partial switch tok.tag {
-        case .Field_Access:
-            next_token(p) or_return
-            append(
-                &sexpr_items,
-                make_sexpr_item(.Field_Access, tok.lexeme, tok.line),
-            )
-        case .Left_Paren:
-            sexpr_item_value := parse_sexpr(p) or_return
-            append(
-                &sexpr_items,
-                make_sexpr_item(.SExpr, sexpr_item_value, tok.line),
-            )
-        case .Number:
-            next_token(p) or_return
-            append(
-                &sexpr_items,
-                make_sexpr_item(.Number, tok.value.(f64), tok.line),
-            )
-        case .Ident:
-            next_token(p) or_return
-            append(&sexpr_items, make_sexpr_item(.Ident, tok.lexeme, tok.line))
-        case .String:
-            next_token(p) or_return
-            append(
-                &sexpr_items,
-                make_sexpr_item(.String, tok.value.(string), tok.line),
-            )
-        case:
-            panic("unreachable")
-        }
+        append(&sexpr_items, parse_sexpr(p) or_return)
     }
     _ = expect(p, .Right_Paren, "expect ')'") or_return
 
     if len(sexpr_items) == 0 {
-        return SExpr {
+        return SExpr_List {
                 items = sexpr_items[:],
                 is_quoted = false,
                 special_form_kind = .None,
@@ -121,10 +111,10 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
     }
 
     if sexpr_items[0].tag != .Ident &&
-       sexpr_items[0].tag != .SExpr &&
+       sexpr_items[0].tag != .List &&
        sexpr_items[0].tag != .Field_Access {
         fmt.eprintln(
-            "error: first item in s-expression should be identifier or s-expression",
+            "error: first item in unquoted s-expression should be identifier or s-expression",
         )
         return {}, false
     }
@@ -138,61 +128,61 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
         case "@pub-import":
             special_form_kind = .Pub_Import
             if len(sexpr_items) != 3 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form '@pub-import' should take 2 arguments (@pub-import <module_name> \"path_to_modile.lfjs\">)",
                 )
             }
             if sexpr_items[1].tag != .Ident {
-                return parse_error(
+                return parse_error_list(
                     "error: special form '@pub-import' expects module name as first argument (@pub-import <module_name> \"path_to_modile.lfjs\">)",
                 )
             }
             if sexpr_items[2].tag != .String {
-                return parse_error(
+                return parse_error_list(
                     "error: special form '@pub-import' expects module path as second argument (@pub-import <module_name> \"path_to_modile.lfjs\">)",
                 )
             }
         case "@embed-code":
             special_form_kind = .Embed_Code
             if len(sexpr_items) != 2 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form '@embed_code' should take 2 arguments (@embed-code \"console.log('hello world')\")",
                 )
             }
         case "@import":
             special_form_kind = .Import
             if len(sexpr_items) != 3 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'import' should take 2 arguments (import <module_name> \"path_to_modile.lfjs\">)",
                 )
             }
             if sexpr_items[1].tag != .Ident {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'import' expects module name as first argument (import <module_name> \"path_to_modile.lfjs\">)",
                 )
             }
             if sexpr_items[2].tag != .String {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'import' expects module path as second argument (import <module_name> \"path_to_modile.lfjs\">)",
                 )
             }
         case "lambda":
             special_form_kind = .Lambda
             if len(sexpr_items) != 3 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'lambda' should take 2 arguments (lambda (<param_0> <param_n>) <s-expression>)",
                 )
             }
             maybe_params_list := sexpr_items[1]
-            if maybe_params_list.tag != .SExpr {
-                return parse_error(
+            if maybe_params_list.tag != .List {
+                return parse_error_list(
                     "error: special form 'lambda' expect parameter name list as first argument, for example (lambda (x y z) (+ x y z))",
                 )
             }
-            params_list := sexpr_items[1].value.(SExpr).items
+            params_list := sexpr_items[1].value.(SExpr_List).items
             for param in params_list {
                 if param.tag != .Ident {
-                    return parse_error(
+                    return parse_error_list(
                         "error: special form 'lambda' expect parameter name list as first argument, for example (lambda (x y z) (+ x y z))",
                     )
                 }
@@ -200,46 +190,46 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
         case "cond":
             special_form_kind = .Cond
             if len(sexpr_items) < 5 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'cond' should take at least 4 arguments (cond <condition-1> <result-1> <cond-2> <result-2> ...)",
                 )
             }
 
             if len(sexpr_items) % 2 == 0 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'cond' should take even number of arguments (cond <condition-1> <result-1> <cond-2> <result-2> ...)",
                 )
             }
         case "do":
             special_form_kind = .Do
             if len(sexpr_items) < 2 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'do' should take at least 1 argument (do <expr-1> [expr-*])",
                 )
             }
         case "def":
             special_form_kind = .Def
             if len(sexpr_items) != 3 && len(sexpr_items) != 4 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'def' should take 2 or 3 arguments (def <def_name> (<param_0> <param_n>) <s-expression>) or (def <def_name> <value>)",
                 )
             }
             if sexpr_items[1].tag != .Ident {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'def' should take definition name as first parameter",
                 )
             }
             if len(sexpr_items) == 4 {
                 maybe_params_list := sexpr_items[2]
-                if maybe_params_list.tag != .SExpr {
-                    return parse_error(
+                if maybe_params_list.tag != .List {
+                    return parse_error_list(
                         "error: special form 'def' expect parameter name list as second argument, for example (def sum3 (x y z) (+ x y z))",
                     )
                 }
-                params_list := sexpr_items[2].value.(SExpr).items
+                params_list := sexpr_items[2].value.(SExpr_List).items
                 for param in params_list {
                     if param.tag != .Ident {
-                        return parse_error(
+                        return parse_error_list(
                             "error: special form 'def' expect parameter name list as second argument, for example (def sum3 (x y z) (+ x y z))",
                         )
                     }
@@ -248,60 +238,27 @@ parse_sexpr :: proc(p: ^Parser) -> (expr: SExpr, ok: bool) {
         case "let":
             special_form_kind = .Let
             if len(sexpr_items) != 3 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'let' should have 2 arguments <(name value)> <s-expression>",
                 )
             }
-            if (sexpr_items[1].tag != .SExpr) ||
-               (len(sexpr_items[1].value.(SExpr).items) % 2 != 0) {
-                return parse_error(
+            if (sexpr_items[1].tag != .List) ||
+               (len(sexpr_items[1].value.(SExpr_List).items) % 2 != 0) {
+                return parse_error_list(
                     "error: special form 'let' should take s-expression in form (name1 value1 name2 value2) as first argument",
                 )
             }
         case "if":
             special_form_kind = .If
             if len(sexpr_items) != 4 {
-                return parse_error(
+                return parse_error_list(
                     "error: special form 'if' should have 3 arguments (<cond> <then> <else>)",
                 )
-            }
-        case "-":
-            special_form_kind = .Minus
-            if len(sexpr_items) < 2 {
-                return parse_error(
-                    "error: special form 'TODO' should have at least 1 argument1",
-                )
-            }
-        case "=", "!=", "+", "*", "/", "<", ">", "<=", ">=":
-            if len(sexpr_items) < 3 {
-                return parse_error(
-                    "error: special form 'TODO' should have at least 2 arguments",
-                )
-            }
-            switch ident {
-            case "=":
-                special_form_kind = .Equal
-            case "!=":
-                special_form_kind = .Not_Equal
-            case "+":
-                special_form_kind = .Plus
-            case "*":
-                special_form_kind = .Mult
-            case "/":
-                special_form_kind = .Div
-            case "<":
-                special_form_kind = .Less
-            case ">":
-                special_form_kind = .Greater
-            case "<=":
-                special_form_kind = .Less_Equal
-            case ">=":
-                special_form_kind = .Greater_Equal
             }
         }
     }
 
-    return SExpr {
+    return SExpr_List {
             items = sexpr_items[:],
             is_quoted = false,
             special_form_kind = special_form_kind,
@@ -315,12 +272,19 @@ parse_error :: proc(msg: string) -> (SExpr, bool) {
     return {}, false
 }
 
-make_sexpr_item := proc(
-    tag: SExpr_Item_Tag,
-    val: SExpr_Item_Value,
-    line: u16,
-) -> SExpr_Item {
-    return {tag = tag, value = val, line = line}
+@(require_results)
+parse_error_list :: proc(msg: string) -> (SExpr_List, bool) {
+    fmt.println(msg)
+    return {}, false
+}
+
+make_sexpr :: proc(
+    tag: SExpr_Tag,
+    value: SExpr_Value,
+    row: u16,
+    col: u16,
+) -> SExpr {
+    return {tag = tag, value = value, row = row, col = col}
 }
 
 @(require_results)

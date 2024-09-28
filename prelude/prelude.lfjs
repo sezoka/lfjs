@@ -1,11 +1,46 @@
-(@embed-code
-    `const _else = true;
+(@embed-code `
+    const _else = true;
     const nil = undefined;
 
+    function print() {
+        console.log(...arguments);
+    }
 
-    function sub() {
+    class RuntimeError extends Error {
+        constructor(msg, row, col) {
+            super(msg)
+            this.row = row;
+            this.col = col;
+        }
+    }
+`)
+
+(@embed-code `
+    function __lfjs_call(maybe_fn, row, col) {
+        if (typeof maybe_fn === "function") {
+            __lfjs_stack.push({name: maybe_fn.name, row, col});
+            return function () {
+                const result = maybe_fn(...arguments);
+                __lfjs_stack.pop();
+                return result;
+            }
+        }
+        throw new RuntimeError("trying to call non-function ", row, col);
+    }
+`)
+
+(@embed-code "
+    function __lfjs_check_var(typeof_var, name, row, col) {
+        if (typeof_var === 'undefined') {
+            throw new RuntimeError(`Undefined name '${name}'`, row, col);
+        }
+    }
+")
+
+(@embed-code `
+    function _45() {
         if (arguments.length < 1) {
-            throw new RuntimeError("builtin function 'sub' requires at least 1 argument");
+            throw new RuntimeError("builtin function '-' requires at least 1 argument");
         }
         if (arguments.length === 1) {
             return -arguments[0];
@@ -13,27 +48,65 @@
         var i = 0;
         var result = 0;
         while (i < arguments.length) {
+            if (typeof arguments[i] !== "number") {
+                throw new RuntimeError("builting function '-' expects numbers");
+            }
             result -= arguments[i];
             i += 1;
         }
         return result + arguments[0] + arguments[0];
     }
+`)
 
-    function sum() {
+(@embed-code `function _42() {
         if (arguments.length < 2) {
-            throw new RuntimeError("builtin function 'sum' requires at least 2 arguments");
+            throw new RuntimeError("builtin function '*' requires at least 2 arguments");
         }
-        var result = 0;
-        var i = 0;
+        var i = 1;
+        var result = arguments[0];
         while (i < arguments.length) {
-            result += arguments[i];
+            if (typeof arguments[i] !== "number") {
+                throw new RuntimeError("builting function '*' expects numbers");
+            }
+            result *= arguments[i];
             i += 1;
         }
         return result;
     }
+`)
 
-    function print() {
-        console.log(...arguments);
+(@embed-code `function _47() {
+        if (arguments.length < 2) {
+            throw new RuntimeError("builtin function '/' requires at least 2 arguments");
+        }
+        var i = 1;
+        var result = arguments[0];
+        while (i < arguments.length) {
+            if (typeof arguments[i] !== "number") {
+                throw new RuntimeError("builting function '/' expects numbers");
+            }
+            result /= arguments[i];
+            i += 1;
+        }
+        return result;
+    }
+`)
+
+(@embed-code `
+    function _43() {
+        if (arguments.length < 2) {
+            throw new RuntimeError("builtin function '+' requires at least 2 arguments");
+        }
+        var result = 0;
+        var i = 0;
+        while (i < arguments.length) {
+            if (typeof arguments[i] !== "number") {
+                throw new RuntimeError("builting function '+' expects numbers");
+            }
+            result += arguments[i];
+            i += 1;
+        }
+        return result;
     }
 `)
 

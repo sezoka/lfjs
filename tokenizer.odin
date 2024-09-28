@@ -9,7 +9,8 @@ Token :: struct {
     tag:    Token_Tag,
     value:  Token_Value,
     lexeme: string,
-    line:   u16,
+    row:    u16,
+    col:    u16,
 }
 
 Token_Tag :: enum {
@@ -30,10 +31,13 @@ Token_Value :: union {
 }
 
 Tokenizer :: struct {
-    reader: strings.Reader,
-    pos:    uint,
-    line:   u16,
-    start:  i64,
+    reader:    strings.Reader,
+    pos:       uint,
+    row:       u16,
+    col:       u16,
+    start_col: u16,
+    start_row: u16,
+    start:     i64,
 }
 
 get_tokens_list :: proc(src: string) -> ([]Token, bool) {
@@ -42,7 +46,8 @@ get_tokens_list :: proc(src: string) -> ([]Token, bool) {
 
     tokenizer := Tokenizer {
         reader = reader,
-        line   = 1,
+        row    = 1,
+        col    = 1,
     }
 
     tokens_list: [dynamic]Token
@@ -72,6 +77,8 @@ scan_next_token :: proc(t: ^Tokenizer) -> (Token, bool) {
     }
 
     t.start = t.reader.i
+    t.start_col = t.col
+    t.start_row = t.row
 
     r := next_rune(t)
 
@@ -161,7 +168,8 @@ make_token :: proc(
     value: Token_Value = {},
 ) -> Token {
     return Token {
-        line = t.line,
+        row = t.start_row,
+        col = t.start_col,
         tag = tag,
         value = value,
         lexeme = t.reader.s[t.start:t.reader.i],
@@ -171,11 +179,8 @@ make_token :: proc(
 skip_whitespaces :: proc(t: ^Tokenizer) {
     for {
         switch peek_rune(t) {
-        case ' ', '\r', '\t':
+        case ' ', '\r', '\t', '\n':
             next_rune(t)
-        case '\n':
-            next_rune(t)
-            t.line += 1
         case ';':
             for !is_tokenizer_at_end(t) && peek_rune(t) != '\n' {
                 next_rune(t)
@@ -195,6 +200,11 @@ peek_rune :: proc(t: ^Tokenizer) -> rune {
 
 next_rune :: proc(t: ^Tokenizer) -> rune {
     rr, size, _ := strings.reader_read_rune(&t.reader)
+    if rr == '\n' {
+        t.row += 1
+        t.col = 0
+    }
+    t.col += 1
     if size == 0 do return 0
     return rr
 }

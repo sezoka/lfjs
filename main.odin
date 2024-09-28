@@ -2,6 +2,7 @@ package lfjs
 
 import "core:fmt"
 import os "core:os/os2"
+import "core:path/filepath"
 import "core:strings"
 
 
@@ -11,6 +12,8 @@ main :: proc() {
         fmt.eprintln("usage: lfjs <src.lfjs> [out.js]")
         return
     }
+
+    fmt.println(filepath.dir(os.args[0]))
 
     js_code, compile_ok := compile_file_to_js(args[1], true, true, ".")
     if !compile_ok do return
